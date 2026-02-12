@@ -103,3 +103,53 @@ Getting AWS account ready to be able to run training and deploy model enpoints w
 ```
 
 Finally, I created an access key for this role which I will need to be able to run training scripts. When you generate a new key, and only at that time of creation, you are provided with a secret key which you need to provide during configuration of AWS CLI using `aws configure`.
+
+### Model training and evaluation scripts
+
+Training and evaluation is orchestrated through two scripts. The entry point to the training job in SageMaker is the script [train.py](https://github.com/eremkazancioglu/species-image-classifier/blob/main/sagemaker-run/train.py) which contains all functions to load a pre-trained model, prepare the training data to be used to fine tune the model, perform K-fold cross validation and prepare evaluation metrics. This script is referenced through another script, [launch\_training.py](https://github.com/eremkazancioglu/species-image-classifier/blob/main/sagemaker-run/launch_training.py), which also contains various configuration parameters for training and evaluation of the model as well as SageMaker resource utilization.
+
+Below I will go through these scripts and highlight several critical parts that demonstrate how data preparation, training and evaluation are executed and also indicate design choices.
+
+#### train.py
+
+I will try and lay this process out as linearly as possible.
+
+1. **Preparing the labeled dataset**
+
+This is a straightforward step where we take the CSV file that we prepared at the end of [Training data collection](training-data-collection.md), encode labels of the four target species and the "other" class, and return a labeled dataset as well as label-species pairs. Below is the key part of the `prepare_data` function where label encoding happens.
+
+```python
+def prepare_data(csv_file, target_species, downsample_other=False, downsample_frac=0.1):
+    (...)
+    # Create binary classification: target species vs 'other'
+    df['label_name'] = df['species_name'].apply(
+        lambda x: x if x in target_species else 'other'
+    )
+    
+    # Encode labels
+    le = LabelEncoder()
+    df['label'] = le.fit_transform(df['label_name'])
+    (...)
+```
+
+Note that there are two arguments `downsample_other` and `downsample_frac`. These allow us to use only a small, configurable fraction of the "other" class for training and evaluation, which is utilized only in the "dry run" mode that I wanted to have as an option to check quickly that the whole training and evaluation pipeline works properly without using the full dataset. This is configured through the script that launches the pipeline and I will get to that later.
+
+2. **Preparing stratified folds for training and validation**
+
+This is also a straightforward step where we determine indices of stratified folds that we we will use to train and validate the model. This happens within the `main` call of the script using `StratifiedKFold` imported from `sklearn`. I don't think there is anything else to point out here. Once we have the folds, we kick off the training process sequentially for each fold.
+
+3. **Determining transformations that are to be applied to each image prior to training and validation**
+
+
+
+3. **Train and validate the model for each fold**
+
+This is where the pre-trained image classification model, `efficientnet_b1`, is fine tuned and evaluated using the training and validation datasets that are determined by each fold. There are a number of steps here that I was newly exposed through PyTorch so I will call those out here and document what is going on.
+
+* **`SpeciesDataset` class:** This is a subclass of PyTorch's `Dataset` class that implements a function (`__getitem__`) that takes an index for an image file, grabs that image file from a specified location, performs any specified image transformations, and returns the image as well as the label associated with that image. I used this class to generate training and validation datasets as shown below.
+
+```python
+train_dataset = SpeciesDataset(train_df, config['data_dir'], train_transform)
+val_dataset = SpeciesDataset(val_df, config['data_dir'], val_transform)
+```
+
