@@ -20,6 +20,10 @@ Due to these performance issues, I first pivoted towards another family of CNN-b
 
 Getting AWS account ready to be able to run training and deploy model enpoints was relatively straightforward. I first created an IAM role using root access, and associated the following policy with this role.
 
+<details>
+
+<summary>IAM Policy</summary>
+
 ```json
 {
     "Version": "2012-10-17",
@@ -102,6 +106,8 @@ Getting AWS account ready to be able to run training and deploy model enpoints w
 }
 ```
 
+</details>
+
 Finally, I created an access key for this role which I will need to be able to run training scripts. When you generate a new key, and only at that time of creation, you are provided with a secret key which you need to provide during configuration of AWS CLI using `aws configure`.
 
 ### Model training and evaluation scripts
@@ -140,9 +146,38 @@ This is also a straightforward step where we determine indices of stratified fol
 
 3. **Determining transformations that are to be applied to each image prior to training and validation**
 
+For each of the folds that we determined, we will make multiple passes through the neural network as we train, validate and repeat where each pass is called an "epoch" (more on this later). At the beginning of each epoch, we perform a set of transformations on the training data which essentially aim both to standardize the images and resulting tensor data so they are compatible with the pre-training of the model (in this case `efficientnet_b1`), and to introduce some variation to images that we might expect to encounter in real-life scenarios (e.g. people will not always take pictures of images perfectly centered in one type of orientation). We perform transformations on the validation data as well, but these are just aimed towards making images and tensor data compatible with the underlying pre-trained model.
 
+These transformations are set up by the function `get_transforms` below.
 
-3. **Train and validate the model for each fold**
+```python
+ def get_transforms(img_size):
+    """Define training and validation transforms"""
+    train_transform = transforms.Compose([
+        transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.2),
+        transforms.RandomRotation(15),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                           std=[0.229, 0.224, 0.225])
+    ])
+    
+    val_transform = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                           std=[0.229, 0.224, 0.225])
+    ])
+    
+    return train_transform, val_transform
+```
+
+First thing to note here is that we pass image size as an argument to this function. This ensures that resized images are compatible with the native resolution the underlying model is pre-trained with. Here, I am using `efficient_b1` which was pre-trained on 240x240 resolution images, so this argument will be set to 240 in this case.
+
+Second, once we apply transformations and turn images into tensors, we normalize these tensors to the distribution of pixel values of the three channels (R, G, B) in ImageNet, which is what `efficientnet_b1` was pre-trained on. With this normalization, input tensor values are aligned with the information on low-level features learned by early layers of the pre-trained model, such as what kind of pixel values correspond to edges or certain types of textures. This is particularly important because, as I will show below, I utilize differential learning rates for earlier and later layers such that we focus more of the learning on features specific to the problem at hand. Without this normalization, the model might struggle to leverage low-level features from the pre-trained model.
+
+4. **Train and validate the model for each fold**
 
 This is where the pre-trained image classification model, `efficientnet_b1`, is fine tuned and evaluated using the training and validation datasets that are determined by each fold. There are a number of steps here that I was newly exposed through PyTorch so I will call those out here and document what is going on.
 
