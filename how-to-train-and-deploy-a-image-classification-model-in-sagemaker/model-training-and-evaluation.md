@@ -181,10 +181,19 @@ Second, once we apply transformations and turn images into tensors, we normalize
 
 This is where the pre-trained image classification model, `efficientnet_b1`, is fine tuned and evaluated using the training and validation datasets that are determined by each fold. There are a number of steps here that I was newly exposed through PyTorch so I will call those out here and document what is going on.
 
-* **`SpeciesDataset` class:** This is a subclass of PyTorch's `Dataset` class that implements a function (`__getitem__`) that takes an index for an image file, grabs that image file from a specified location, performs any specified image transformations, and returns the image as well as the label associated with that image. I used this class to generate training and validation datasets as shown below.
+* **`SpeciesDataset` class:** This is a subclass of PyTorch's `Dataset` class that implements a function (`__getitem__`) that takes an index for an image file, grabs that image file from a specified location, performs any specified image transformations (see above), and returns the image as well as the label associated with that image. I used this class to generate training and validation datasets as shown below.
 
 ```python
 train_dataset = SpeciesDataset(train_df, config['data_dir'], train_transform)
 val_dataset = SpeciesDataset(val_df, config['data_dir'], val_transform)
+```
+
+* **`DataLoader` class:** Instances of this class is what actually utilize the `__getitem__` function of `SpeciesDataset` and puts the training and validation data together. Image data is processed in batches where, in each epoch, batches of images are passed forward and backward through the neural network, one batch at a time. For the training pass, images are first shuffled to ensure that each batch represents a variety of images and any inherent structure in the dataset (e.g. images of a species come one after the other) is removed. For the validation pass, no such shuffling is necessary as we are just calculating the performance of the model following the training pass. Data loaders are set up as below.
+
+```python
+train_loader = DataLoader(train_dataset, batch_size=config['batch_size'], 
+                          shuffle=True, num_workers=4, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=config['batch_size'], 
+                        shuffle=False, num_workers=4, pin_memory=True)
 ```
 
