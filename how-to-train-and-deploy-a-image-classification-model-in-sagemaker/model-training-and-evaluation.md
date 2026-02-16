@@ -197,3 +197,23 @@ val_loader = DataLoader(val_dataset, batch_size=config['batch_size'],
                         shuffle=False, num_workers=4, pin_memory=True)
 ```
 
+* **Model initialization:** I fine tune a pre-trained model, `efficientnet_b1` in this analysis, but a few things happen before training, during model initialization. First, I explicitly enable fine-tuning all layers of the neural network (`param.requires_grad = True`) so the training process can adjust the weights. Second, I replace the final layer of the neural network that I use here, where the classification happens, with a pipeline that first randomly turns off a given proportion of neurons (`nn.Dropout`) and then computes a linear transformation (`nn.Linear`) of inputs from the previous layer to produce raw, non-normalized scores for each of the target classes. Dropout that precedes linear transformation acts as normalization that counteracts overfitting and improves generalization, which is especially important here because I am taking a model that was pre-trained on over a million images to classify 1,000 different categories and fine-tuning on a relatively small dataset to predict a handful of categories. Below is how I initialize the model.
+
+```python
+def create_model_efficientnet(num_classes):
+    """Create EfficientNet model"""
+    model = models.efficientnet_b1(pretrained=True)
+    
+    # Explicitly unfreeze all layers for fine-tuning
+    for param in model.parameters():
+        param.requires_grad = True
+    
+    # Replace classifier
+    num_features = model.classifier[1].in_features
+    model.classifier = nn.Sequential(
+        nn.Dropout(0.5),
+        nn.Linear(num_features, num_classes)
+    )
+    
+    return model
+```
